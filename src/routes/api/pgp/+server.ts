@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import Listener from '../../../models/listener.schema';
 import Message from '../../../models/messages.schema';
 import Image from '../../../models/file.schema';
+import Voice from '../../../models/voice.schema';
 
 interface Listener {
   pbKey: string;
@@ -43,10 +44,32 @@ async function saveImage(imageData: { dataURI: string; blurhash: string; nsfw: b
   return image;
 }
 
-async function createMessage(messageText: string, imageId: string | null, author: string) {
+async function saveVoice(voiceData: {
+  encryptedAudio: string[];
+  preset: string;
+  durationSeconds: number;
+} | null) {
+  if (!voiceData?.encryptedAudio?.length) return null;
+
+  const voice = new Voice({
+    encryptedAudio: voiceData.encryptedAudio,
+    preset: voiceData.preset,
+    durationSeconds: voiceData.durationSeconds
+  });
+  await voice.save();
+  return voice;
+}
+
+async function createMessage(
+  messageText: string,
+  imageId: string | null,
+  voiceId: string | null,
+  author: string
+) {
   const message = new Message({
     message: messageText,
     image: imageId,
+    voice: voiceId,
     author
   });
   await message.save();
@@ -74,11 +97,18 @@ export async function GET({ url }) {
 
   const user = await Listener.findOne({ rid }, { messages: { $slice: -lim } }).populate({
     path: 'messages',
-    populate: {
-      path: 'image',
-      model: 'Image',
-      select: '-dataURI'
-    }
+    populate: [
+      {
+        path: 'image',
+        model: 'Image',
+        select: '-dataURI'
+      },
+      {
+        path: 'voice',
+        model: 'Voice',
+        select: '-encryptedAudio'
+      }
+    ]
   });
   if (user) {
     return json({ status: 200, body: user });
@@ -88,11 +118,17 @@ export async function GET({ url }) {
 }
 
 export async function PATCH({ request }) {
-  const { message, imageData, r: author, p: recipientId } = await request.json();
+  const { message, imageData, voiceData, r: author, p: recipientId } = await request.json();
 
   try {
     const image = await saveImage(imageData);
-    const newMessage = await createMessage(message, image?._id ?? null, author);
+    const voice = await saveVoice(voiceData ?? null);
+    const newMessage = await createMessage(
+      message,
+      image?._id ?? null,
+      voice?._id ?? null,
+      author
+    );
     const listener = await updateListenerWithMessage(recipientId, newMessage._id);
 
     if (listener?.webhookUrl) {

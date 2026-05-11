@@ -116,6 +116,9 @@
                 blurhash: encryptedMessage.image?.blurhash,
                 nsfw: encryptedMessage.image?.nsfw
               },
+              voice: encryptedMessage.voice?._id
+                ? { id: encryptedMessage.voice._id, preset: encryptedMessage.voice.preset }
+                : null,
               r: encryptedMessage.author,
               timestamp: encryptedMessage.timestamp
             };
@@ -193,7 +196,7 @@
     <div class="flex w-full flex-col  p-4 pt-8">
       {#if unlocked}
         {#each [...decryptedMessages].reverse() as msg (msg)}
-          <Message {msg} />
+          <Message {msg} {loadedPair} />
         {/each}
 
         {#if !decryptedMessages.length}

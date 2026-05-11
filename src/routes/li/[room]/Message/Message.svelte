@@ -3,6 +3,7 @@
   import prettyMilliseconds from 'pretty-ms';
   import { onMount } from 'svelte';
   import BlurhashThumbnail from './BlurhashThumbnail.svelte';
+  import VoicePlayer from './VoicePlayer.svelte';
   import { domToPng } from 'modern-screenshot';
   import FileArrowDown from 'phosphor-svelte/lib/FileArrowDown';
   import Copy from 'phosphor-svelte/lib/Copy';
@@ -10,11 +11,13 @@
   import XCircle from 'phosphor-svelte/lib/XCircle';
   import * as Dialog from '$lib/components/ui/dialog/index.js';
   import { Button } from '$lib/components/ui/button';
+  import type { IKeyPairs } from '$lib/types';
   interface Props {
     msg: any;
+    loadedPair: IKeyPairs | undefined;
   }
 
-  let { msg }: Props = $props();
+  let { msg, loadedPair }: Props = $props();
   const color = generateConsistentIndices(msg.r);
 
   let time = $state('');
@@ -133,8 +136,13 @@
       </span>
     {/if}
 
-    <span class="w-full">
-      {msg.msg}
+    <span class="w-full flex flex-col gap-1">
+      {#if msg.msg && msg.msg.trim()}
+        <span>{msg.msg}</span>
+      {/if}
+      {#if msg.voice?.id}
+        <VoicePlayer voiceId={msg.voice.id} preset={msg.voice.preset ?? 'ghost'} {loadedPair} />
+      {/if}
     </span>
     <div class="absolute right-2 bottom-2 flex flex-row items-center justify-center">
       <span class="text-xs">{time}</span>
