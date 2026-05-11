@@ -70,55 +70,79 @@
     const numChannels = decoded.numberOfChannels;
     const numFrames = decoded.length;
 
-    const offlineCtx = new OfflineAudioContext(numChannels, numFrames, sampleRate);
+    // Output buffer must match the *actual* output duration after rate change.
+    // Slower playback → longer output; faster playback → shorter output.
+    const rate = preset === 'ghost' ? 0.85 : preset === 'chipmunk' ? 1.3 : 1.0;
+    const outputFrames = Math.ceil(numFrames / rate);
+
+    const offlineCtx = new OfflineAudioContext(numChannels, outputFrames, sampleRate);
     const source = offlineCtx.createBufferSource();
     source.buffer = decoded;
 
     if (preset === 'ghost') {
-      // Ghost: pitch down (slow playback) + heavy reverb simulation via convolver
-      source.playbackRate.value = 0.75;
+      // Pitch down slightly + reverb blended with dry signal so words stay audible
+      source.playbackRate.value = 0.85;
+
+      // Dry path (70% – keeps the voice intelligible)
+      const dryGain = offlineCtx.createGain();
+      dryGain.gain.value = 0.7;
+      source.connect(dryGain);
+      dryGain.connect(offlineCtx.destination);
+
+      // Wet reverb path (30% – adds the eerie/ghostly wash)
       const convolver = offlineCtx.createConvolver();
-      const irLength = Math.floor(sampleRate * 2.5);
+      const irLength = Math.floor(sampleRate * 1.2);
       const irBuffer = offlineCtx.createBuffer(2, irLength, sampleRate);
       for (let ch = 0; ch < 2; ch++) {
-        const data = irBuffer.getChannelData(ch);
+        const d = irBuffer.getChannelData(ch);
         for (let i = 0; i < irLength; i++) {
-          data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / irLength, 2);
+          d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / irLength, 3);
         }
       }
       convolver.buffer = irBuffer;
-      const gainNode = offlineCtx.createGain();
-      gainNode.gain.value = 0.55;
+      const wetGain = offlineCtx.createGain();
+      wetGain.gain.value = 0.3;
       source.connect(convolver);
-      convolver.connect(gainNode);
-      gainNode.connect(offlineCtx.destination);
-    } else if (preset === 'robot') {
-      // Robot: ring modulation — multiply signal by a sine carrier
-      const oscillator = offlineCtx.createOscillator();
-      oscillator.type = 'sine';
-      oscillator.frequency.value = 50;
-      const ringGain = offlineCtx.createGain();
-      ringGain.gain.value = 0;
-      oscillator.connect(ringGain.gain);
-      source.connect(ringGain);
-      const gainNode = offlineCtx.createGain();
-      gainNode.gain.value = 2;
-      ringGain.connect(gainNode);
-      gainNode.connect(offlineCtx.destination);
-      oscillator.start();
-    } else {
-      // Chipmunk: pitch up via faster playback
-      source.playbackRate.value = 1.55;
-    }
+      convolver.connect(wetGain);
+      wetGain.connect(offlineCtx.destination);
 
-    if (preset !== 'ghost' && preset !== 'robot') {
+    } else if (preset === 'robot') {
+      // Hard-clip WaveShaper → digital/robotic crunch without changing pitch,
+      // so speech tempo is preserved and every word stays clear.
+      const shaper = offlineCtx.createWaveShaper();
+      const curve = new Float32Array(512);
+      for (let i = 0; i < 512; i++) {
+        const x = (i * 2) / 512 - 1;
+        // Clip at ±0.45, then boost → sharp square-wave-like distortion
+        curve[i] = Math.max(-0.45, Math.min(0.45, x * 4)) * 2.2;
+      }
+      shaper.curve = curve;
+      shaper.oversample = '4x';
+
+      // Subtle 8 Hz amplitude tremolo → robotic pulsing feel
+      const tremoloOsc = offlineCtx.createOscillator();
+      tremoloOsc.type = 'sine';
+      tremoloOsc.frequency.value = 8;
+      const tremoloDepth = offlineCtx.createGain();
+      tremoloDepth.gain.value = 0.12;
+      const tremoloGain = offlineCtx.createGain();
+      tremoloGain.gain.value = 0.88;
+      tremoloOsc.connect(tremoloDepth);
+      tremoloDepth.connect(tremoloGain.gain);
+      tremoloOsc.start(0);
+
+      source.connect(shaper);
+      shaper.connect(tremoloGain);
+      tremoloGain.connect(offlineCtx.destination);
+
+    } else {
+      // Chipmunk: moderate speed-up — audibly high-pitched but still intelligible
+      source.playbackRate.value = 1.3;
       source.connect(offlineCtx.destination);
     }
 
     source.start(0);
     const renderedBuffer = await offlineCtx.startRendering();
-
-    // Encode to WAV
     return audioBufferToWavBlob(renderedBuffer);
   }
 
